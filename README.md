@@ -5,6 +5,12 @@ This repository contains scripts for training and testing [H3](https://github.co
 
 Varios experiments can be found as [notebooks](./examples/notebooks).
 
+## Installation
+You will need to install the `feed_h3` package from source with the following command:
+```bash
+pip install -e .
+```
+
 ## Acknowledgments
 This work is based of the research [Hungry Hungry Hippos: Towards Language Modeling with State Space Models](https://arxiv.org/abs/2212.14052) paper. The implementation of the H3 model sourced from the [official repository](https://github.com/HazyResearch/H3).
 
