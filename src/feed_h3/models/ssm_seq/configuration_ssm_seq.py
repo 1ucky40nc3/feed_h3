@@ -36,7 +36,7 @@ class AttnConfig(Config):
 
 
 @dataclass
-class SSMModelConfig(Config):
+class SSMSeqConfig(Config):
     d_model: int = 768
     n_layer: int = 12
     ssm_cfg: SSMConfig = SSMConfig()

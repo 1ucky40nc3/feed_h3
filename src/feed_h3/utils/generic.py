@@ -1,17 +1,13 @@
-from typing import Any
 from dataclasses import dataclass
-
-
-dict_keys = Any
 
 
 @dataclass
 class Config:
-    def keys(self) -> dict_keys[str, Any]:
+    def keys(self):
         return self.__dict__.keys()
 
-    def __setitem__(self, item: Any, key: str) -> None:
+    def __setitem__(self, item, key):
         setattr(self, key, item)
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key):
         return getattr(self, key)
