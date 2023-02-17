@@ -3,10 +3,10 @@ from feed_h3.utils import dataclass
 
 def test_configclass():
     @dataclass
-    class A():
-        b: int = 1
+    class Cls():
+        attr: str = 'val'
     
-    a = A()
+    cls = Cls()
 
-    assert a.b == 1
-    assert {**a}['b'] == 1
+    assert cls.attr == 'val'
+    assert {**cls}['attr'] == 'val'
