@@ -1,13 +1,20 @@
-from dataclasses import dataclass
+import dataclasses
 
 
-@dataclass
-class Config:
-    def keys(self):
-        return self.__dict__.keys()
+def dataclass(cls=None, **kwargs):
+    def wrap(cls):
+        def keys(self):
+            return self.__dict__.keys()
+        
+        def __getitem__(self, key):
+            return getattr(self, key)
+        
+        setattr(cls, 'keys', keys)
+        setattr(cls, '__getitem__', __getitem__)
 
-    def __setitem__(self, item, key):
-        setattr(self, key, item)
+        return dataclasses.dataclass(cls)
 
-    def __getitem__(self, key):
-        return getattr(self, key)
+    if cls is None:
+        return wrap
+
+    return wrap(cls)

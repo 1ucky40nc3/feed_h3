@@ -3,15 +3,14 @@ from typing import (
     Optional
 )
 from dataclasses import (
-    dataclass,
     field
 )
 
-from feed_h3.utils import Config
+from feed_h3.utils import dataclass
 
 
 @dataclass
-class SSMConfig(Config):
+class SSMConfig:
     head_dim: int = 1
     d_state: int = 64
     dropout: float = 0.0
@@ -21,7 +20,7 @@ class SSMConfig(Config):
 
 
 @dataclass
-class AttnConfig(Config):
+class AttnConfig:
     num_heads: int = 12
     bias: bool = True
     dropout: float = 0.0
@@ -36,7 +35,7 @@ class AttnConfig(Config):
 
 
 @dataclass
-class SSMSeqConfig(Config):
+class SSMSeqConfig:
     d_model: int = 768
     n_layer: int = 12
     ssm_cfg: SSMConfig = SSMConfig()
