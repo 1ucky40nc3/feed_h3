@@ -6,8 +6,9 @@ This repository contains scripts for training and testing [H3](https://github.co
 Varios experiments can be found as [notebooks](./examples/notebooks).
 
 ## Installation
-You will need to install the `feed_h3` package from source with the following command:
+You will need to install the `feed_h3` package from source with the following commands:
 ```bash
+pip install -e ./submodules/H3/
 pip install -e .
 ```
 
