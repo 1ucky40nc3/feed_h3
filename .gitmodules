@@ -1,0 +1,3 @@
+[submodule "external/H3"]
+	path = external/H3
+	url = https://github.com/1ucky40nc3/H3.git
