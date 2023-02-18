@@ -1,0 +1,3 @@
+[submodule "submodules/H3"]
+	path = submodules/H3
+	url = https://github.com/1ucky40nc3/H3.git
