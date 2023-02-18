@@ -1,8 +1,8 @@
-from feed_h3.utils import dataclass
+from feed_h3.utils import configclass
 
 
 def test_configclass():
-    @dataclass
+    @configclass
     class Cls():
         attr: str = 'val'
     

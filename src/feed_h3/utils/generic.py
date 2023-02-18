@@ -1,7 +1,8 @@
 import dataclasses
+from transformers import PretrainedConfig
 
 
-def dataclass(cls=None, **kwargs):
+def configclass(cls=None, **kwargs):
     def wrap(cls):
         def keys(self):
             return self.__dict__.keys()
@@ -12,7 +13,7 @@ def dataclass(cls=None, **kwargs):
         setattr(cls, 'keys', keys)
         setattr(cls, '__getitem__', __getitem__)
 
-        return dataclasses.dataclass(cls)
+        return  dataclasses.dataclass(cls)
 
     if cls is None:
         return wrap

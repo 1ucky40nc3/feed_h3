@@ -1,1 +1,1 @@
-from .generic import dataclass
+from .generic import configclass
