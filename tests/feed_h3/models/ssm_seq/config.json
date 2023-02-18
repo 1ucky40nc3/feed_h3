@@ -1,0 +1,23 @@
+{
+  "attn_bias": true,
+  "attn_layer_idx": [
+    6
+  ],
+  "attn_n_head": 12,
+  "attn_pdrop": 0.0,
+  "attn_rotary_dim": null,
+  "embed_pdrop": 0.1,
+  "fused_dropout_add_ln": false,
+  "fused_mlp": false,
+  "n_embd": 768,
+  "n_inner": null,
+  "n_layer": 12,
+  "resid_pdrop": 0.0,
+  "ssm_d_state": 64,
+  "ssm_head_dim": 1,
+  "ssm_measure": "diag-lin",
+  "ssm_mode": "diag",
+  "ssm_pdrop": 0.0,
+  "ssm_use_fast_fttconv": false,
+  "transformers_version": "4.26.1"
+}

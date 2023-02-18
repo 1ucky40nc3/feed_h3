@@ -2,14 +2,15 @@ from typing import (
     List,
     Optional
 )
-from dataclasses import (
-    field
-)
+from transformers import PretrainedConfig
 
-from feed_h3.utils import dataclass
+from feed_h3.utils import configclass
 
 
-@dataclass
+UNDEFINED = '__UNDEFINED__'
+
+
+@configclass
 class SSMConfig:
     head_dim: int = 1
     d_state: int = 64
@@ -19,7 +20,7 @@ class SSMConfig:
     use_fast_fftconv: bool = False
 
 
-@dataclass
+@configclass
 class AttnConfig:
     num_heads: int = 12
     bias: bool = True
@@ -33,23 +34,34 @@ class AttnConfig:
         if self.rotary_emb_dim is None:
             self.rotary_emb_dim = 0
 
+class SSMSeqConfig(PretrainedConfig):
+    def __init__(
+        self,
+        n_embd: int = 768,
+        n_inner: Optional[int] = None,
+        n_layer: int = 12,
+        attn_layer_idx: List[int] = [6],
+        attn_n_head: Optional[int] = 12,
+        attn_pdrop: float = 0.0,
+        attn_rotary_dim: Optional[int] = None,
+        attn_bias: bool = True,
+        ssm_head_dim: int = 1,
+        ssm_d_state: int = 64,
+        ssm_pdrop: float = 0.0,
+        ssm_mode: str = 'diag',
+        ssm_measure: str = 'diag-lin',
+        ssm_use_fast_fttconv: bool = False,
+        resid_pdrop: float = 0.0,
+        embed_pdrop: float = 0.1,
+        fused_mlp: bool = False,
+        fused_dropout_add_ln = False,
+        **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
 
-@dataclass
-class SSMSeqConfig:
-    d_model: int = 768
-    n_layer: int = 12
-    ssm_cfg: SSMConfig = SSMConfig()
-    attn_cfg: AttnConfig = AttnConfig()
-    resid_dropout: float = 0.0
-    embed_dropout: float = 0.1
-    layer_norm_epsilon: float = 1e-5
-    d_inner: Optional[int] = None
-    attn_layer_idx: Optional[List[int]] = field(
-        default_factory=lambda: [6]
-    )
-    fused_mlp: bool = False
-    fused_dropout_add_ln: bool = False
-
-    def __post_init__(self):
-        if self.d_inner is None:
-            self.d_inner = 4 * self.d_model
+        # Set all but `self` and `kwargs` automatically
+        args = locals()
+        del args['self']
+        del args['kwargs']
+        for k, v in args.items():
+            setattr(self, k, v)
