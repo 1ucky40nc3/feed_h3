@@ -28,7 +28,7 @@ class AttnConfig:
     rotary_emb_dim: Optional[int] = None
 
     def __post_init__(self):
-        assert self.rotary_emb_dim in [None, 64], \
+        assert self.rotary_emb_dim in [None, 0, 64], \
             'The `rotary_emb_dim` can either be `None`/`64`.'
         
         if self.rotary_emb_dim is None:
@@ -53,11 +53,15 @@ class SSMSeqConfig(PretrainedConfig):
         ssm_use_fast_fttconv: bool = False,
         resid_pdrop: float = 0.0,
         embed_pdrop: float = 0.1,
+        vocab_size: int = None,
+        layer_norm_epsilon: float = 1e-5,
         fused_mlp: bool = False,
         fused_dropout_add_ln = False,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
+
+        assert vocab_size is not None, 'The `vocab_size` needs to be provided!'
 
         # Set all but `self` and `kwargs` automatically
         args = locals()
