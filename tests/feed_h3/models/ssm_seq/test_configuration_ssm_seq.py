@@ -17,7 +17,8 @@ def test_attn_config():
 
 
 def test_ssm_seq_config():
-    config = SSMSeqConfig()
+    vocab_size = 1
+    config = SSMSeqConfig(vocab_size=vocab_size)
     config.save_pretrained(TEST_PATH)
     config = SSMSeqConfig.from_pretrained(TEST_PATH)
     assert str(config) == str(SSMSeqConfig())
