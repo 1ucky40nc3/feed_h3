@@ -1,6 +1,7 @@
 from typing import Optional
 
 import sys
+import logging
 from dataclasses import (
     dataclass,
     field
@@ -19,10 +20,10 @@ from transformers import (
 )
 
 import accelerate
-from accelerate import logging
+from accelerate.logging import get_logger
 
 
-logger = logging.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -131,8 +132,7 @@ class DataTrainingArguments:
         default=None,
         metadata={
             "help": (
-                "Number of processed used to do processing."
-                " If "
+                "Number of processes used to do preprocessing."
             )
         }
     )
@@ -146,10 +146,10 @@ def main():
     ))
     training_args, model_args, data_args = parser.parse_args_into_dataclasses()
 
-    accelerate.logging.basicConfig(
+    logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler('./logs/run_clm.logs')],
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
