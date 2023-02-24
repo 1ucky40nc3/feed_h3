@@ -9,6 +9,7 @@ Varios experiments can be found as [notebooks](./examples/notebooks).
 You will need to install the `feed_h3` package from source with the following commands:
 ```bash
 git clone --recurse-submodules -j8 https://github.com/1ucky40nc3/feed_h3
+cd feed_h3
 pip install -e ./external/H3/
 pip install -e .
 ```
