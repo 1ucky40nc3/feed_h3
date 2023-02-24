@@ -105,25 +105,25 @@ class DataTrainingArguments:
     )
     keep_linebreaks: Optional[bool] = field(
         default=True,
-        help={
+        metadata={
             "help": "State if you want to keep linebreaks during training and validation."
         }
     )
     max_train_samples: Optional[int] = field(
         default=None,
-        help={
+        metadata={
             "help": "Maximum number of training examples (mainly for testing)."
         }
     )
     max_validation_samples: Optional[int] = field(
         default=None,
-        help={
+        metadata={
             "help": "Maximum number of validation examples (mainly for testing)."
         }
     )
     overwrite_cache: Optional[bool] = field(
         default=False,
-        help={
+        metadata={
             "help": "State if you want to overwrite cached training and validation datasets."
         }
     )
