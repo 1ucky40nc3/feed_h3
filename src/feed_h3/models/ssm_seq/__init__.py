@@ -3,3 +3,4 @@ from .configuration_ssm_seq import (
     AttnConfig,
     SSMSeqConfig
 )
+from .modeling_ssm_seq import SSMLMHeadModel
