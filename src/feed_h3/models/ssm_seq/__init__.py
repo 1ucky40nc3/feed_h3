@@ -1,6 +1,2 @@
-from .configuration_ssm_seq import (
-    SSMConfig,
-    AttnConfig,
-    SSMSeqConfig
-)
+from .configuration_ssm_seq import SSMSeqConfig
 from .modeling_ssm_seq import SSMLMHeadModel

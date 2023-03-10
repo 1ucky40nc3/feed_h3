@@ -12,6 +12,7 @@ import torch.nn as nn
 
 from transformers import PreTrainedModel
 from transformers.utils import ModelOutput
+from transformers.pytorch_utils import Conv1D
 
 from h3.models.ssm_seq import SSMModel
 
@@ -20,7 +21,7 @@ from flash_attn.utils.generation import (
     InferenceParams
 )
 
-from feed_h3 import (
+from .configuration_ssm_seq import (
     SSMSeqConfig, 
     SSMConfig, 
     AttnConfig
@@ -41,9 +42,25 @@ class SSMPretrainedModel(PreTrainedModel):
 
     def __init__(self, *inputs, **kwargs):
         super().__init__(*inputs, **kwargs)
+    
+    def _init_weights(self, module):
+        """Initialize the weights."""
+        if isinstance(module, (nn.Linear, Conv1D)):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
 
 
-class SSMLMHeadModel(PreTrainedModel, GeneratorMixin):
+class SSMLMHeadModel(SSMPretrainedModel, GenerationMixin):
     def __init__(self, config, pad_vocab_size_to_multiple_of: int = 1):
         super().__init__(config)
 
@@ -51,13 +68,15 @@ class SSMLMHeadModel(PreTrainedModel, GeneratorMixin):
         #     self.config.vocab_size += pad_vocab_size_to_multiple_of \
         #         - (config.vocab_size % pad_vocab_size_to_multiple_of)
 
+        print(f'{config=}')
+
         self.ssm_cfg = SSMConfig(
             head_dim=config.ssm_head_dim,
             d_state=config.ssm_d_state,
             dropout=config.ssm_pdrop,
             mode=config.ssm_mode,
-            measuse=config.ssm_measure,
-            use_fast_fftconv=config.ssm_use_fast_fftconv
+            measure=config.ssm_measure,
+            use_fast_fftconv=config.ssm_use_fast_fttconv
         )
         self.attn_cfg = AttnConfig(
             num_heads=config.attn_n_head,
@@ -67,7 +86,7 @@ class SSMLMHeadModel(PreTrainedModel, GeneratorMixin):
         )
 
         self.backbone = SSMModel(
-            d_model=config.n_embed,
+            d_model=config.n_embd,
             n_layer=config.n_layer,
             d_inner=config.n_inner,
             vocab_size=config.vocab_size,
@@ -82,10 +101,12 @@ class SSMLMHeadModel(PreTrainedModel, GeneratorMixin):
         )
 
         self.lm_head = nn.Linear(
-            in_features=self.config.n_embed,
+            in_features=self.config.n_embd,
             out_features=self.config.vocab_size,
             bias=False
         )
+
+        self.post_init()
 
     def _tie_weights(self):
         self.lm_weight = self.backbone.embeddings.word_embeddings.weight

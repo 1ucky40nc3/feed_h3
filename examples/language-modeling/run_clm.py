@@ -13,7 +13,6 @@ from dataclasses import (
 from itertools import chain
 
 import flatten_dict
-from tqdm import tqdm
 
 import torch
 
@@ -39,6 +38,8 @@ from transformers import (
 
 import accelerate
 from accelerate import Accelerator
+from accelerate.utils import find_executable_batch_size
+from accelerate.utils.tqdm import tqdm
 from accelerate.logging import get_logger
 
 
@@ -169,7 +170,80 @@ class DataTrainingArguments:
     )
 
 
-def get_dataloaders(accelerator, tokenizer, training_args, model_args, data_args):
+def get_tokenizer(model_args):
+    # Initialize the tokenizer
+    if model_args.tokenizer_name:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_args.tokenizer_name, 
+            use_fast=model_args.use_fast_tokenizer
+        )
+    elif model_args.model_name_or_path:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path, 
+            use_fast=model_args.use_fast_tokenizer
+        )
+    else:
+        raise ValueError(
+            'You are instantiating a new tokenizer from scratch. This is not supported by this script.'
+            'You can do it from another script, save it, and load it from here, using --tokenizer_name.'
+        )
+    return tokenizer
+
+
+def get_model(model_args):
+    # Initialize the config
+    if model_args.config_name:
+        config = SSMSeqConfig.from_pretrained(model_args.config_name)
+    elif model_args.model_name_or_path:
+        config = SSMSeqConfig.from_pretrained(model_args.model_name_or_path)
+    else:
+        logger.info('Initializing new config from scratch!')
+        config = SSMSeqConfig()
+        if model_args.config_overrides is not None:
+            logger.info(f'Overriding config with: {model_args.config_overrides}')
+            config.update_from_string(model_args.config_overrides)
+
+    # Initialize the model
+    if model_args.model_name_or_path:
+        model = SSMLMHeadModel.from_pretrained(
+            model_args.model_name_or_path,
+            config=config
+        )
+    else:
+        logger.info('Training model from scratch!')
+        model = SSMLMHeadModel.from_config(config)
+    
+    return model
+
+
+def get_optimizer(model, training_args):
+    no_decay = ['bias', 'layer_norm.weight']
+    optimizer_grouped_parameters = [
+        {
+            'params': [
+                p 
+                for n, p in model.named_parameters() 
+                if not any(nd in n for nd in no_decay)
+            ],
+            'weight_decay': training_args.weight_decay,
+        },
+        {
+            'params': [
+                p 
+                for n, p in model.named_parameters() 
+                if any(nd in n for nd in no_decay)
+            ],
+            'weight_decay': 0.0,
+        },
+    ]
+    optimizer = torch.optim.AdamW(
+        optimizer_grouped_parameters, 
+        lr=training_args.learning_rate
+    )
+    return optimizer
+
+
+def get_data(accelerator, tokenizer, training_args, model_args, data_args):
     # Prepare the raw datasets
     if data_args.dataset_name is not None:
         dataset_config_name = data_args.dataset_config_name
@@ -244,7 +318,7 @@ def get_dataloaders(accelerator, tokenizer, training_args, model_args, data_args
     if data_args.block_size is None:
         block_size = tokenizer.model_max_length
         if block_size > 1024:
-            print(
+            accelerator.print(
                 'The chosen tokenizer supports a `model_max_length` that is longer than the default `block_size` value'
                 ' of 1024. If you would like to use a longer `block_size` up to `tokenizer.model_max_length` you can'
                 ' override this default with `--block_size xxx`.'
@@ -252,7 +326,7 @@ def get_dataloaders(accelerator, tokenizer, training_args, model_args, data_args
         block_size = 1024
     else:
         if data_args.block_size > tokenizer.model_max_length:
-            print(
+            accelerator.print(
                 f'The block_size passed ({data_args.block_size}) is larger than the maximum length for the model'
                 f'({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}.'
             )
@@ -314,123 +388,7 @@ def get_dataloaders(accelerator, tokenizer, training_args, model_args, data_args
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def training_fn(training_args, model_args, data_args):
-    accelerator_kwargs = {
-        'mixed_precision': None if training_args.fp16 is False else 'fp16',
-        'gradient_accumulation_steps': training_args.gradient_accumulation_steps,
-        'log_with': training_args.report_to,
-        'project_dir': training_args.logging_dir,
-    }
-    accelerator = Accelerator(**accelerator_kwargs)
-    accelerator.wait_for_everyone()        
-
-    # Initialize the config
-    if model_args.config_name:
-        config = SSMSeqConfig.from_pretrained(model_args.config_name)
-    elif model_args.model_name_or_path:
-        config = SSMSeqConfig.from_pretrained(model_args.model_name_or_path)
-    else:
-        logger.info('Initializing new config from scratch!')
-        config = SSMSeqConfig()
-        if model_args.config_overrides is not None:
-            logger.info(f'Overriding config with: {model_args.config_overrides}')
-            config.update_from_string(model_args.config_overrides)
-
-    # Initialize the tokenizer
-    if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_args.tokenizer_name, 
-            use_fast=model_args.use_fast_tokenizer
-        )
-    elif model_args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path, 
-            use_fast=model_args.use_fast_tokenizer
-        )
-    else:
-        raise ValueError(
-            'You are instantiating a new tokenizer from scratch. This is not supported by this script.'
-            'You can do it from another script, save it, and load it from here, using --tokenizer_name.'
-        )
-
-    # Initialize the model
-    if model_args.model_name_or_path:
-        model = SSMLMHeadModel.from_pretrained(
-            model_args.model_name_or_path,
-            config=config
-        )
-    else:
-        logger.info('Training model from scratch!')
-        model = SSMLMHeadModel.from_config(config)
-
-    no_decay = ['bias', 'layer_norm.weight']
-    optimizer_grouped_parameters = [
-        {
-            'params': [
-                p 
-                for n, p in model.named_parameters() 
-                if not any(nd in n for nd in no_decay)
-            ],
-            'weight_decay': training_args.weight_decay,
-        },
-        {
-            'params': [
-                p 
-                for n, p in model.named_parameters() 
-                if any(nd in n for nd in no_decay)
-            ],
-            'weight_decay': 0.0,
-        },
-    ]
-    optimizer = torch.optim.AdamW(
-        optimizer_grouped_parameters, 
-        lr=training_args.learning_rate
-    )
-
-    (
-        train_dataset, 
-        eval_dataset, 
-        train_dataloader, 
-        eval_dataloader
-    ) = get_dataloaders(accelerator, training_args, model_args, data_args)
-
-    overrode_max_train_steps  = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / training_args.gradient_accumulation_steps)
-    if training_args.max_steps in (None, -1):
-        training_args.max_steps = training_args.num_train_epochs * num_update_steps_per_epoch
-        overrode_max_train_steps  = True
-
-    lr_scheduler = get_scheduler(
-        name=training_args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=training_args.warmup_steps * training_args.gradient_accumulation_steps,
-        num_training_steps=training_args.max_steps * training_args.gradient_accumulation_steps,
-    )
-
-    (
-        model, 
-        optimizer, 
-        train_dataloader, 
-        eval_dataloader, 
-        lr_scheduler
-    ) = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
-    )
-
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / training_args.gradient_accumulation_steps)
-    if overrode_max_train_steps:
-        training_args.max_steps = int(training_args.num_train_epochs * num_update_steps_per_epoch)
-    # Afterwards we recalculate our number of training epochs
-    training_args.num_train_epochs = math.ceil(training_args.max_steps / num_update_steps_per_epoch)
-
-    # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = training_args.save_steps
-    if checkpointing_steps is not None and isinstance(checkpointing_steps, str) and checkpointing_steps.isdigit():
-        checkpointing_steps = int(checkpointing_steps)
-
-    total_batch_size = training_args.per_device_train_batch_size * accelerator.num_processes * training_args.gradient_accumulation_steps
-
+def initialize_trackers(accelerator, model, training_args, model_args, data_args):
     # Initialize the loggers
     experiment_config = {**vars(training_args), **vars(data_args), **vars(model_args), **vars(model.config)}
     # TensorBoard cannot log Enums, need the raw value
@@ -441,88 +399,176 @@ def training_fn(training_args, model_args, data_args):
     experiment_config = {k: cast(v) for k, v in experiment_config.items() if not k.startswith('_')}
     accelerator.init_trackers('feed_h3_clm', experiment_config)
 
-    # Train!
-    print('***** Running training *****')
-    print(f'  Num examples = {len(train_dataset)}')
-    print(f'  Num Epochs = {training_args.num_train_epochs}')
-    print(f'  Instantaneous batch size per device = {training_args.per_device_train_batch_size}')
-    print(f'  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}')
-    print(f'  Gradient Accumulation steps = {training_args.gradient_accumulation_steps}')
-    print(f'  Total optimization steps = {training_args.max_steps}')
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(training_args.max_steps), disable=not accelerator.is_local_main_process)
-    completed_steps = 0
-    starting_epoch = 0
 
-    for epoch in range(starting_epoch, training_args.num_train_epochs):
-        model.train()
-        total_loss = 0
-        for step, batch in enumerate(train_dataloader):
-            with accelerator.accumulate(model):
-                output = model(**batch)
-                loss = output.loss
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-            
-            if accelerator.sync_gradients:
-                progress_bar.update(1)
-                completed_steps += 1
-            
-            if isinstance(checkpointing_steps, int):
-                if completed_steps % checkpointing_steps == 0:
-                    output_dir = f'step_{completed_steps }'
-                    if training_args.output_dir is not None:
-                        output_dir = os.path.join(training_args.output_dir, output_dir)
-                    accelerator.save_state(output_dir)
-            if completed_steps >= training_args.max_steps:
-                break
+def train_fn(training_args, model_args, data_args):
+    accelerator_kwargs = {
+        'mixed_precision': None if training_args.fp16 is False else 'fp16',
+        'log_with': training_args.report_to,
+        'project_dir': training_args.logging_dir,
+    }
+    accelerator = Accelerator(**accelerator_kwargs)
+    accelerator.wait_for_everyone()
 
-        model.eval()
-        losses = []
-        for step, batch in enumerate(eval_dataloader):
-            with torch.no_grad():
-                output = model(**batch)
-            loss = output.loss
-            losses.append(
-                accelerator.gather_for_metrics(
-                    loss.repeat(training_args.per_device_eval_batch_size)
-                )
-            )
-        losses = torch.cat(losses)
-        try:
-            eval_loss = torch.mean(losses)
-            perplexity = math.exp(eval_loss)
-        except OverflowError:
-            perplexity = float('inf')
+    metric = evaluate.load('perlexity')
 
-        print(f'epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}')
+    # Set the targeted per device batch size during training.
+    # Note: We set the same batch size during evaluation.
+    per_device_train_batch_size_target = training_args.per_device_train_batch_size
 
-        accelerator.log(
-            {
-                'perplexity': perplexity,
-                'eval_loss': eval_loss,
-                'train_loss': total_loss.item() / len(train_dataloader),
-                'epoch': epoch,
-                'step': completed_steps,
-            },
-            step=completed_steps,
+    @find_executable_batch_size(starting_batch_size=per_device_train_batch_size_target)
+    def _train_fn(per_device_train_batch_size):
+        nonlocal accelerator
+
+        # TODO: set seed here
+
+        # Update the configuration based on the appropriate batch size
+        gradient_accumulation_steps = per_device_train_batch_size_target // per_device_train_batch_size
+        training_args.per_device_train_batch_size = per_device_train_batch_size
+        training_args.per_device_eval_batch_size = per_device_train_batch_size
+        training_args.gradient_accumulation_steps = gradient_accumulation_steps
+        accelerator.gradient_accumulation_steps = gradient_accumulation_steps
+
+        tokenizer = get_tokenizer(model_args)
+        model = get_model(model_args)
+        model = model.to(accelerator.device)
+        optimizer = get_optimizer(model, training_args)
+
+        (
+            train_dataset, 
+            eval_dataset, 
+            train_dataloader, 
+            eval_dataloader
+        ) = get_data(accelerator, training_args, model_args, data_args)
+
+        overrode_max_train_steps  = False
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / training_args.gradient_accumulation_steps)
+        if training_args.max_steps in (None, -1):
+            training_args.max_steps = training_args.num_train_epochs * num_update_steps_per_epoch
+            overrode_max_train_steps  = True
+
+        lr_scheduler = get_scheduler(
+            name=training_args.lr_scheduler_type,
+            optimizer=optimizer,
+            num_warmup_steps=training_args.warmup_steps * training_args.gradient_accumulation_steps,
+            num_training_steps=training_args.max_steps * training_args.gradient_accumulation_steps,
         )
 
-    if training_args.output_dir is not None:
-        output_dir = f'step_{completed_steps}'
+        (
+            model, 
+            optimizer, 
+            train_dataloader, 
+            eval_dataloader, 
+            lr_scheduler
+        ) = accelerator.prepare(
+            model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
+        )
+
+        # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / training_args.gradient_accumulation_steps)
+        if overrode_max_train_steps:
+            training_args.max_steps = int(training_args.num_train_epochs * num_update_steps_per_epoch)
+        # Afterwards we recalculate our number of training epochs
+        training_args.num_train_epochs = math.ceil(training_args.max_steps / num_update_steps_per_epoch)
+
+        # Figure out how many steps we should save the Accelerator states
+        checkpointing_steps = training_args.save_steps
+        if checkpointing_steps is not None and isinstance(checkpointing_steps, str) and checkpointing_steps.isdigit():
+            checkpointing_steps = int(checkpointing_steps)
+
+        total_batch_size = training_args.per_device_train_batch_size * accelerator.num_processes * training_args.gradient_accumulation_steps
+
+        if training_args.report_to is not None and accelerator.is_main_process:
+            initialize_trackers(accelerator, model, training_args, model_args, data_args)
+
+        # TODO: Check if the dataset has a length - do in own variable - if not use training max steps of something
+        # TODO: checkpoint resuming is missing
+
+        # Train!
+        accelerator.print('***** Running training *****')
+        accelerator.print(f'  Num examples = {len(train_dataset)}')
+        accelerator.print(f'  Num Epochs = {training_args.num_train_epochs}')
+        accelerator.print(f'  Instantaneous batch size per device = {training_args.per_device_train_batch_size}')
+        accelerator.print(f'  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}')
+        accelerator.print(f'  Gradient Accumulation steps = {training_args.gradient_accumulation_steps}')
+        accelerator.print(f'  Total optimization steps = {training_args.max_steps}')
+        # Only show the progress bar once on each machine.
+        progress_bar = tqdm(range(training_args.max_steps), disable=not accelerator.is_local_main_process)
+        completed_steps = 0
+        starting_epoch = 0
+
+        for epoch in range(starting_epoch, training_args.num_train_epochs):
+            model.train()
+            train_losses = []
+            for batch in train_dataloader:
+                with accelerator.accumulate(model):
+                    output = model(**batch)
+                    loss = output.loss
+
+                    # TODO: gather for metrics here
+                    train_losses.append(loss.detach().float())
+                    accelerator.backward(loss)
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad()
+                
+                if accelerator.sync_gradients:
+                    progress_bar.update(1)
+                    completed_steps += 1
+
+                if training_args.logging_steps % completed_steps == 0:
+                    train_loss = torch.mean(torch.cat(train_losses)) 
+                
+                if isinstance(checkpointing_steps, int):
+                    if completed_steps % checkpointing_steps == 0:
+                        output_dir = f'step_{completed_steps }'
+                        if training_args.output_dir is not None:
+                            output_dir = os.path.join(training_args.output_dir, output_dir)
+                        accelerator.save_state(output_dir)
+                if completed_steps >= training_args.max_steps:
+                    break
+
+            model.eval()
+            eval_losses = []
+            for batch in eval_dataloader:
+                with torch.no_grad():
+                    output = model(**batch)
+                eval_losses = output.loss
+                eval_losses.append(
+                    accelerator.gather_for_metrics(
+                        loss.repeat(training_args.per_device_eval_batch_size)
+                    )
+                )
+            eval_losses = torch.cat(eval_losses)
+            eval_loss = torch.mean(eval_losses)
+            try:
+                perplexity = math.exp(eval_loss)
+            except OverflowError:
+                perplexity = float('inf')
+
+            accelerator.print(f'epoch {epoch}: perplexity: {perplexity} eval_loss: {eval_loss}')
+            accelerator.log(
+                {
+                    'perplexity': perplexity,
+                    'eval_loss': eval_loss,
+                    'train_loss': train_loss.item() / len(train_dataloader),
+                    'epoch': epoch,
+                    'step': completed_steps,
+                },
+                step=completed_steps,
+            )
+
         if training_args.output_dir is not None:
-            output_dir = os.path.join(training_args.output_dir, output_dir)
-        accelerator.save_state(output_dir)
-        accelerator.wait_for_everyone()
+            output_dir = f'step_{completed_steps}'
+            if training_args.output_dir is not None:
+                output_dir = os.path.join(training_args.output_dir, output_dir)
+            accelerator.save_state(output_dir)
+            accelerator.wait_for_everyone()
 
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(training_args.output_dir)
+            if accelerator.is_main_process:
+                tokenizer.save_pretrained(training_args.output_dir)
 
-            with open(os.path.join(training_args.output_dir, 'all_results.json'), 'w') as f:
-                json.dump({'perplexity': perplexity}, f)
+                with open(os.path.join(training_args.output_dir, 'all_results.json'), 'w') as f:
+                    json.dump({'perplexity': perplexity}, f)
 
 def main():
     parser = HfArgumentParser((

@@ -1,1 +1,1 @@
-from .ssm_seq import *
+from . import ssm_seq
